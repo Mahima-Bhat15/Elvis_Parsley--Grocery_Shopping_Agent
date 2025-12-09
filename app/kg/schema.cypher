@@ -1,0 +1,12 @@
+// Uniqueness
+CREATE CONSTRAINT store_id IF NOT EXISTS FOR (s:Store) REQUIRE s.id IS UNIQUE;
+CREATE CONSTRAINT product_id IF NOT EXISTS FOR (p:Product) REQUIRE p.id IS UNIQUE;
+CREATE CONSTRAINT deal_id IF NOT EXISTS FOR (d:Deal) REQUIRE d.id IS UNIQUE;
+CREATE CONSTRAINT sku_id IF NOT EXISTS FOR (s:SKU) REQUIRE s.id IS UNIQUE;
+CREATE CONSTRAINT price_id IF NOT EXISTS FOR (p:Price) REQUIRE p.id IS UNIQUE;
+
+
+// Helpful indexes
+CREATE INDEX store_name IF NOT EXISTS FOR (s:Store) ON (s.name);
+CREATE INDEX product_name IF NOT EXISTS FOR (p:Product) ON (p.name);
+CREATE INDEX deal_end_date IF NOT EXISTS FOR (d:Deal) ON (d.end_date);

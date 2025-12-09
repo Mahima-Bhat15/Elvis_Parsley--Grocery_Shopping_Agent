@@ -1,0 +1,704 @@
+<!-- <!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Grocery Deals Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #111827cc;
+      --text: #e5e7eb;
+      --muted: #a1a1aa;
+      --accent: #22c55e;
+      --chip: #0b1220aa;
+    }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: radial-gradient(1200px 600px at 70% -10%, #1f2937, #0f172a 55%);
+      color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto;
+    }
+    .wrap { max-width: 1160px; margin: 32px auto; padding: 0 20px; }
+    h1 { font-size: 28px; margin: 8px 0 16px; display:flex; align-items:center; gap:10px }
+    .pill { font-size:12px; background:#16a34a22; color:#86efac; padding:4px 8px; border-radius:999px; border:1px solid #16a34a44; }
+    .panel {
+      background: #0b1220aa; backdrop-filter: blur(8px);
+      border: 1px solid #ffffff14; border-radius: 16px; padding: 18px; margin-bottom:20px;
+    }
+    .searchbar { display:flex; gap:12px; align-items:center; }
+    .searchbar input[type="text"] {
+      flex:1; background:#0f172acc; color:var(--text);
+      border:1px solid #ffffff1a; border-radius:10px; padding:14px;
+      outline:none; font-size:16px;
+    }
+    .searchbar button {
+      background:#22c55e; color:#052e16; font-weight:700;
+      border:none; border-radius:10px; padding:12px 18px; cursor:pointer;
+      box-shadow: 0 6px 20px #22c55e33;
+    }
+    .chips { margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; }
+    .chip { padding:6px 10px; background:var(--chip); border:1px solid #ffffff1a; border-radius:999px; color:#cbd5e1; font-size:13px; }
+    .controls { display:flex; align-items:center; gap:16px; margin-top:10px; }
+    .controls input[type="number"]{ width:80px; background:#0f172acc; color:var(--text); border:1px solid #ffffff1a; padding:6px 8px; border-radius:8px; }
+    .grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:18px; margin-top:16px; }
+    .card {
+      background: var(--card); border:1px solid #ffffff14; border-radius:16px;
+      overflow:hidden; display:flex; flex-direction:column;
+    }
+    .imgbox {
+      height: 220px; display:grid; place-items:center; background:#030712aa; border-bottom:1px solid #ffffff10;
+    }
+    .imgbox img { width: 240px; height: 180px; object-fit: contain; }
+    .meta { padding:16px; display:flex; flex-direction:column; gap:8px; }
+    .title { font-weight:700; line-height:1.2; }
+    .subtle { color: var(--muted); font-size:14px; }
+    .offer { display:flex; justify-content:space-between; align-items:center; }
+    .store { font-size:12px; background:#0b1220; border:1px solid #ffffff14; padding:4px 8px; border-radius:999px; }
+    .price { color: var(--accent); font-weight:800; }
+    .cta { background:#0b1220; border-top:1px solid #ffffff10; padding:12px; }
+    .cta button { width:100%; background:#0ea5e9; color:#022c3a; border:none; border-radius:10px; padding:10px; cursor:pointer; font-weight:700; }
+    .empty { color:#94a3b8; padding:18px }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Grocery Deals Assistant <span class="pill">LIVE + KG</span></h1>
+
+    <div class="panel">
+      <div class="searchbar">
+        <input id="q" type="text" placeholder="e.g., Best milk deals under $3 at Target and Walmart" />
+        <button id="go">Find Deals</button>
+      </div>
+      <div class="chips">
+        <span class="chip">Target Veggies</span>
+        <span class="chip">Walmart Cucumbers</span>
+        <span class="chip">Kroger Cereal</span>
+      </div>
+      <div class="controls">
+        <label><input id="dealsOnly" type="checkbox" /> Deals only</label>
+        <span>Max $</span>
+        <input id="maxPrice" type="number" step="0.01" value="3.00" />
+      </div>
+    </div>
+
+    <h2>Found <span id="count">0</span> Great Deals</h2>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display:none">No results yet.</div>
+  </div>
+
+  <script>
+    const API = "http://localhost:8000";
+    const PLACEHOLDER =
+      "data:image/svg+xml;charset=utf-8," +
+      encodeURIComponent(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='600' height='400'>
+           <rect width='100%' height='100%' fill='#0b1220'/>
+           <text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle'
+             font-family='system-ui, -apple-system, Segoe UI, Roboto' font-size='16' fill='#64748b'>
+             No image
+           </text>
+         </svg>`
+      );
+
+    async function resolveFromBackend(url) {
+      try {
+        const r = await fetch(`${API}/resolve_images`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: [{ product_url: url }] }),
+        });
+        if (!r.ok) return null;
+        const data = await r.json();
+        const first = (data.items && data.items[0]) || {};
+        return first.image_url || null;
+      } catch {
+        return null;
+      }
+    }
+
+    async function renderImage(imgEl, row) {
+      const setSrc = (src) => {
+        imgEl.src = src || PLACEHOLDER;
+      };
+      imgEl.loading = "lazy";
+      imgEl.referrerPolicy = "no-referrer";
+      imgEl.decoding = "async";
+      imgEl.onerror = () => (imgEl.src = PLACEHOLDER);
+
+      // 1) row.image_url
+      if (row.image_url) return setSrc(row.image_url);
+
+      // 2) any offer.image_url
+      const offers = Array.isArray(row.offers) ? row.offers : [];
+      const withImg = offers.find((o) => o && o.image_url);
+      if (withImg) return setSrc(withImg.image_url);
+
+      // 3) resolve from any product_url
+      const withUrl = offers.find((o) => o && o.product_url);
+      if (withUrl && withUrl.product_url) {
+        const resolved = await resolveFromBackend(withUrl.product_url);
+        if (resolved) return setSrc(resolved);
+      }
+
+      // 4) placeholder
+      setSrc(null);
+    }
+
+    function cardTemplate(row) {
+      const best = (row.offers && row.offers[0]) || {};
+      const price = typeof best.price === "number" ? best.price.toFixed(2) : "—";
+      const store = best.store || "—";
+      const url = best.product_url || "#";
+      const category = row.category || "—";
+      const brand = row.brand || "";
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "card";
+      wrapper.innerHTML = `
+        <div class="imgbox">
+          <img alt="${(row.product_name || "Product").replace(/"/g, '&quot;')}">
+        </div>
+        <div class="meta">
+          <div class="title">${row.product_name || "Unnamed product"}</div>
+          <div class="subtle">${brand ? brand + " • " : ""}${category}</div>
+          <div class="offer">
+            <span class="store">${store}</span>
+            <span class="price">$${price}</span>
+          </div>
+        </div>
+        <div class="cta">
+          <a href="${url}" target="_blank" rel="noopener">
+            <button ${url === "#" ? "disabled" : ""}>View Deal</button>
+          </a>
+        </div>
+      `;
+      // start async image fill (not blocking the DOM)
+      renderImage(wrapper.querySelector("img"), row);
+      return wrapper;
+    }
+
+    function showResults(rows) {
+      const grid = document.getElementById("grid");
+      const empty = document.getElementById("empty");
+      const count = document.getElementById("count");
+
+      grid.innerHTML = "";
+      if (!rows || !rows.length) {
+        empty.style.display = "block";
+        count.textContent = "0";
+        return;
+      }
+      empty.style.display = "none";
+      count.textContent = rows.length.toString();
+
+      rows.forEach((r) => grid.appendChild(cardTemplate(r)));
+    }
+
+    async function findDeals() {
+      const q = document.getElementById("q").value.trim();
+      const maxPriceStr = document.getElementById("maxPrice").value;
+      const dealsOnly = document.getElementById("dealsOnly").checked;
+      const payload = { message: q };
+      if (maxPriceStr) {
+        const v = parseFloat(maxPriceStr);
+        if (!isNaN(v)) payload.max_price = v;
+      }
+      payload.deal_only = !!dealsOnly;
+
+      const r = await fetch(`${API}/best_cards_live`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json();
+      showResults(data.results || data || []);
+    }
+
+    document.getElementById("go").addEventListener("click", findDeals);
+    document.getElementById("q").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") findDeals();
+    });
+
+    // initial demo call (optional)
+    // findDeals();
+
+  function ensureAbsolute(url) {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('/')) {
+    // try to infer store by reading the "store_domain" on the first offer
+    return null; // we drop it; backend now sends absolute URLs
+  }
+  return `https://${url}`;
+}
+
+function openDeal(url) {
+
+  const u = ensureAbsolute(url);
+  if (!u) return;
+  window.open(u, '_blank', 'noopener,noreferrer');
+}
+
+  </script>
+</body>
+</html> -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grocery Deals Assistant</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-url: url('/assets/bg4.png');
+      --primary: #16a34a;
+      --primary-hover: #15803d;
+      --surface: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --glass: rgba(255, 255, 255, 0.85);
+      --glass-border: rgba(255, 255, 255, 0.5);
+      --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      color: var(--text-main);
+      background: linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3)), var(--bg-url);
+      background-size: cover;
+      background-position: center;
+      background-attachment: fixed;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 32px; }
+
+    header { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .title { font-weight: 800; font-size: 32px; color: white; text-shadow: 0 2px 4px rgba(0,0,0,0.3); letter-spacing: -0.5px; }
+    .badge { font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 4px 10px; border-radius: 20px; background: #ecfdf5; color: var(--primary); box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+
+    .search-panel {
+      background: var(--glass);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: var(--shadow-lg);
+      display: flex; flex-direction: column; gap: 20px;
+      max-width: 800px; margin: 0 auto; width: 100%;
+    }
+
+    .search-bar-wrapper { display: flex; gap: 12px; }
+    .search-input-container { flex: 1; position: relative; }
+    input[type="text"] {
+      width: 100%; padding: 16px 20px; font-size: 18px;
+      border: 2px solid transparent; border-radius: 14px; background: white;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.05); transition: all 0.2s;
+    }
+    input[type="text"]:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px rgba(22,163,74,.2); }
+    .submit-btn {
+      padding: 0 28px; font-size: 16px; font-weight: 600;
+      background: var(--primary); color: white; border: none; border-radius: 14px;
+      cursor: pointer; transition: background 0.2s, transform .1s; display: flex; align-items: center; gap: 8px;
+    }
+    .submit-btn:hover { background: var(--primary-hover); transform: translateY(-1px); }
+
+    .controls-row {
+      display: flex; justify-content: space-between; align-items: center;
+      flex-wrap: wrap; gap: 16px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,0.06);
+    }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chip {
+      font-size: 13px; font-weight: 500; padding: 6px 12px; background: white; border: 1px solid #e2e8f0;
+      border-radius: 20px; color: var(--text-muted); cursor: pointer; transition: all 0.2s;
+    }
+    .chip:hover { background: #f1f5f9; color: var(--primary); border-color: var(--primary); }
+    .filters { display: flex; gap: 16px; align-items: center; }
+    .filter-item { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--text-main); }
+    .price-input { width: 80px; padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; }
+
+    .results-area { margin-top: 20px; }
+    .section-title { font-size: 20px; font-weight: 700; color: white; margin-bottom: 20px; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; }
+    .card {
+      background: white; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+      transition: transform 0.2s, box-shadow 0.2s; border: none; display: flex; flex-direction: column; height: 100%;
+    }
+    .card:hover { transform: translateY(-5px); box-shadow: var(--shadow-lg); }
+    .thumb { height: 200px; background: #f8fafc; display: flex; align-items: center; justify-content: center; padding: 20px; position: relative; }
+    .thumb img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform 0.3s; }
+    .card:hover .thumb img { transform: scale(1.05); }
+    .body { padding: 20px; flex: 1; display: flex; flex-direction: column; }
+    .name { font-size: 16px; font-weight: 700; color: var(--text-main); margin-bottom: 6px; line-height: 1.4; }
+    .meta { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; display: flex; gap: 6px; }
+    .price-block { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; }
+    .main-price { font-size: 18px; font-weight: 700; color: var(--primary); }
+    .store-badge { font-size: 12px; background: #f1f5f9; padding: 4px 8px; border-radius: 6px; color: var(--text-muted); font-weight: 600; }
+    .deal-tag { background: #fee2e2; color: #dc2626; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+    .open-btn { display: block; width: 100%; text-align: center; margin-top: 16px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 10px; text-decoration: none; color: var(--text-main); font-size: 14px; font-weight: 600; transition: all 0.2s; }
+    .open-btn:hover { background: var(--text-main); color: white; border-color: var(--text-main); }
+
+    .skeleton {
+      background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+      background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px;
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    .status-container { display: flex; align-items: center; gap: 10px; color: white; font-weight: 600; background: rgba(0,0,0,0.45); padding: 8px 16px; border-radius: 20px; backdrop-filter: blur(4px); }
+    .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg) } }
+    .err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 16px; border-radius: 12px; margin-bottom: 20px; display: none; }
+    
+    /* Mascot styles */
+    .mascot-wrap { position: fixed; left: 24px; bottom: 24px; z-index: 9999; width: 240px; height: auto; pointer-events: none; }
+    .mascot { width: 100%; height: 100%; display: grid; place-items: center; }
+    .mascot img { width: 100%; height: auto; object-fit: contain; filter: drop-shadow(0 6px 12px rgba(0,0,0,.25)); }
+    .mascot-bubble { position: absolute; bottom: 100%; left: 0%; transform: translate(10%, 32px); background: #0f172a; color: #f8fafc; padding: 14px 18px; border-radius: 18px; font-size: 14px; font-weight: 600; box-shadow: 0 6px 16px rgba(0,0,0,0.35); max-width: 260px; line-height: 1.5; opacity: 0; }
+    .mascot-bubble::after { content: ''; position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%) rotate(45deg); width: 10px; height: 10px; background: #0f172a; border-right: 1px solid rgba(255,255,255,.2); border-bottom: 1px solid rgba(255,255,255,.2); }
+    .mascot-idle { animation: mascotFloat 3s ease-in-out infinite; }
+    @keyframes mascotFloat { 0% { transform: translateY(0); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+    @media(max-width: 600px){ .mascot-wrap { width: 100px; left: 10px; bottom: 10px; } }
+  </style>
+</head>
+<body>
+
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="title">Grocery Deals Assistant</div>
+        <span class="badge">Live + KG</span>
+      </div>
+      <div id="status"></div>
+    </header>
+
+    <section class="search-panel">
+      <form id="form">
+        <div class="search-bar-wrapper">
+          <div class="search-input-container">
+            <input id="q" type="text" placeholder="What are you looking for today?" />
+          </div>
+          <button class="submit-btn" id="go" type="submit">Find Deals</button>
+        </div>
+
+        <div class="controls-row">
+          <div class="chips">
+            <span class="chip" data-sample="best vegetable deals from target under $3">Target Veggies</span>
+            <span class="chip" data-sample="cheapest cucumbers from walmart">Walmart Cucumbers</span>
+            <span class="chip" data-sample="best cereal deals from kroger under $4">Kroger Cereal</span>
+          </div>
+
+          <div class="filters">
+            <label class="filter-item" style="cursor:pointer">
+              <input type="checkbox" id="dealOnly" style="width:16px;height:16px;accent-color:var(--primary)" />
+              <span>Deals only</span>
+            </label>
+            <label class="filter-item">
+              <span>Max $</span>
+              <input id="maxPrice" class="price-input" type="number" min="0" step="0.01" placeholder="3.00" />
+            </label>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <section class="results-area">
+      <div id="answer" class="section-title"></div>
+      <div id="error" class="err"></div>
+      <div id="grid" class="grid"></div>
+    </section>
+  </div>
+
+  <div class="mascot-wrap" id="mascotWrap" aria-hidden="true">
+    <div class="mascot mascot-idle" id="mascot">
+      <img id="mascotImg" alt="Elvis Parsley mascot">
+    </div>
+    <div class="mascot-bubble" id="mascotBubble">
+      <div style="font-size:13px;margin-bottom:2px;">👋 Hi! I’m <strong>Elvis Parsley</strong>.</div>
+      <div>Your deal wingman. Ask anything to start saving.</div>
+    </div>
+  </div>
+
+<script>
+/* =========================
+   INTEGRATED SCRIPT LOGIC
+   ========================= */
+
+// ⚠️ IMPORTANT: Point to the actual FastAPI backend (Port 8000)
+const API_URL = "http://localhost:8000";
+
+/** Toggle if you want stricter filtering by the main noun found in the query. */
+const STRICT_FOCUS = false;
+
+/** Minimal, tasteful placeholder */
+const PLACEHOLDER_IMG =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="600" height="400">
+    <rect width="100%" height="100%" fill="#f8fafc"/>
+    <text x="50%" y="50%" fill="#94a3b8" font-family="system-ui" font-size="18" dominant-baseline="middle" text-anchor="middle">No image</text>
+  </svg>`);
+
+/** Attempt to determine the "head term" (used only if STRICT_FOCUS=true). */
+function headTermFrom(text) {
+  const t = (text || "").toLowerCase();
+  const vocab = ["avocado","tomato","cucumber","milk","yogurt","cheese","cereal","banana","lettuce","onion","pepper","broccoli","apple","bread","egg","butter"];
+  return vocab.find(k => t.includes(k)) || null;
+}
+
+/** Build an absolute URL or return null if it can’t be trusted. */
+function ensureAbsolute(url, storeDomain) {
+  if (!url) return null;
+  const u = url.trim();
+  if (u.startsWith("http://") || u.startsWith("https://")) return u;
+  if (u.startsWith("//")) return `https:${u}`;
+  if (u.startsWith("/")) {
+    if (!storeDomain) return null;
+    return `https://${storeDomain}${u}`;
+  }
+  if (/^[\w.-]+\.[a-z]{2,}\/?/i.test(u)) return `https://${u}`;
+  return null;
+}
+
+/** Pick the best candidate image from a row. */
+function pickBestImage(row) {
+  if (row.image_url) return row.image_url;
+  const offers = Array.isArray(row.offers) ? row.offers : [];
+  for (const off of offers) {
+    if (off?.image_url) return off.image_url;
+  }
+  return null;
+}
+
+/** Try backend resolver with the first usable product_url. */
+async function resolveImageViaAPI(row) {
+  const offers = Array.isArray(row.offers) ? row.offers : [];
+  for (const off of offers) {
+    const u = ensureAbsolute(off?.product_url, off?.store_domain);
+    if (!u) continue;
+    try {
+      // NOTE: Updated to use API_URL
+      const res = await fetch(`${API_URL}/resolve_images`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [{ product_url: u }] }) 
+      });
+      if (!res.ok) continue;
+      const data = await res.json(); 
+      const items = data.items || data; 
+      const img = Array.isArray(items) && items[0]?.image_url ? items[0].image_url : null;
+      if (img) return img;
+    } catch (e) { console.error(e); }
+  }
+  return null;
+}
+
+/** Decide whether a row passes the optional semantic focus. */
+function passesFocus(row, headTerm, queryText) {
+  if (!STRICT_FOCUS || !headTerm) return true;
+  const name = (row.product_name || "").toLowerCase();
+  const cat  = (row.category || "").toLowerCase();
+  let ok = name.includes(headTerm) || cat.includes(headTerm);
+  if (ok && /organic/i.test(queryText)) {
+    ok = /organic/i.test(name) || /organic/i.test(cat);
+  }
+  return ok;
+}
+
+function showSpinner(text='Searching stores...') {
+  const status = document.getElementById('status');
+  status.innerHTML = `<div class="status-container"><div class="spinner"></div><div>${text}</div></div>`;
+}
+function clearSpinner() { document.getElementById('status').innerHTML = ''; }
+
+function skeleton(n=6){
+  const grid = document.getElementById("grid");
+  const cards = Array.from({length:n}, () => `
+    <div class="card">
+      <div class="thumb"><div class="skeleton" style="width:100%; height:100%"></div></div>
+      <div class="body">
+        <div class="skeleton" style="height:20px; width:80%; margin-bottom:10px"></div>
+        <div class="skeleton" style="height:14px; width:40%; margin-bottom:20px"></div>
+        <div class="skeleton" style="height:30px; width:100%; margin-top:auto"></div>
+      </div>
+    </div>`).join('');
+  grid.innerHTML = cards;
+}
+
+/** Render one card into the container using EXISTING STYLES */
+async function renderCard(row, queryText) {
+  const grid = document.getElementById("grid");
+  if (!grid) return;
+
+  const firstOffer = Array.isArray(row.offers) && row.offers.length ? row.offers[0] : {};
+  const productHref = ensureAbsolute(firstOffer.product_url || row.product_url, firstOffer.store_domain || row.store_domain);
+  
+  // Formatting
+  const priceVal = (firstOffer.price ?? row.price);
+  const priceStr = (priceVal == null || isNaN(priceVal)) ? '–' : `$${Number(priceVal).toFixed(2)}`;
+  const dealHtml = (firstOffer.deal_type) ? `<span class="deal-tag">${firstOffer.deal_type}</span>` : '';
+  const storeName = firstOffer.store || row.store || "Store";
+
+  // DOM Create
+  const card = document.createElement("div");
+  card.className = "card"; 
+  
+  card.innerHTML = `
+    <div class="thumb">
+      <img alt="${(row.product_name || "Product").replace(/"/g, '&quot;')}" src="${PLACEHOLDER_IMG}" loading="lazy">
+    </div>
+    <div class="body">
+      <div class="name">${row.product_name || "Unnamed item"}</div>
+      <div class="meta">${row.brand ? row.brand + " • " : ""}${row.category || ""}</div>
+      <div class="price-block">
+        <div><span class="store-badge">${storeName}</span></div>
+        <div class="main-price">${priceStr} ${dealHtml}</div>
+      </div>
+      ${productHref 
+        ? `<a class="open-btn" href="${productHref}" target="_blank" rel="noopener">View Deal</a>`
+        : `<button disabled class="open-btn" style="opacity:0.5;cursor:not-allowed">Unavailable</button>`
+      }
+    </div>
+  `;
+  
+  grid.appendChild(card);
+
+  // ASYNC IMAGE RESOLUTION (post-render)
+  let imgUrl = pickBestImage(row);
+  const imgEl = card.querySelector("img");
+  
+  // Helper to create proxied URL
+  const makeProxyUrl = (u) => `${API_URL}/img?url=${encodeURIComponent(u)}`;
+
+  if (imgUrl) {
+    imgEl.src = makeProxyUrl(imgUrl);
+  } else {
+    // Try resolving
+    resolveImageViaAPI(row).then(resolved => {
+      if (resolved) imgEl.src = makeProxyUrl(resolved);
+    });
+  }
+}
+
+/** Main Render Orchestrator */
+async function renderDeals(rows, queryText) {
+  const grid = document.getElementById("grid");
+  const ans = document.getElementById("answer");
+  const err = document.getElementById("error");
+  
+  grid.innerHTML = "";
+  err.style.display = 'none';
+
+  const head = headTermFrom(queryText);
+  const filtered = (Array.isArray(rows) ? rows : []).filter(r => passesFocus(r, head, queryText));
+
+  ans.textContent = `Found ${filtered.length} Great Deals`;
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `<div style="color:white; opacity:0.9; grid-column:1/-1; text-align:center; padding:20px; background:rgba(0,0,0,0.3); border-radius:12px;">No matching products found.</div>`;
+    return;
+  }
+
+  for (const row of filtered) {
+    await renderCard(row, queryText);
+  }
+}
+
+/* =========================
+   EVENT LISTENERS
+   ========================= */
+document.addEventListener("DOMContentLoaded", () => {
+  const form = document.getElementById('form');
+  const qInput = document.getElementById('q');
+  const maxPrice = document.getElementById('maxPrice');
+  const dealOnly = document.getElementById('dealOnly');
+
+  // Chip clicks
+  document.querySelectorAll('.chip').forEach(ch => {
+    ch.addEventListener('click', () => { qInput.value = ch.dataset.sample; qInput.focus(); });
+  });
+
+  async function search() {
+    const message = (qInput?.value || "").trim();
+    if (!message) return;
+    
+    skeleton(6);
+    showSpinner();
+
+    const maxVal = parseFloat(maxPrice?.value);
+    const body = { 
+      message, 
+      max_price: isNaN(maxVal) ? null : maxVal,
+      deal_only: dealOnly.checked 
+    };
+
+    try {
+      // NOTE: Updated to use API_URL
+      const res = await fetch(`${API_URL}/best_cards_live`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      
+      if (!res.ok) throw new Error("Server error");
+      
+      const data = await res.json(); 
+      const rows = Array.isArray(data) ? data : (data.results || []);
+      renderDeals(rows, message);
+    } catch (e) {
+      console.error(e);
+      document.getElementById("error").textContent = "Could not load results. Is the backend running on port 8000?";
+      document.getElementById("error").style.display = 'block';
+      document.getElementById("grid").innerHTML = "";
+    } finally {
+      clearSpinner();
+    }
+  }
+
+  form.addEventListener('submit', (e) => { e.preventDefault(); search(); });
+});
+
+/* =========================
+   MASCOT LOGIC
+   ========================= */
+const MASCOT_SRC = "/assets/elvis.png";
+const wrap = document.getElementById('mascotWrap');
+const bubble = document.getElementById('mascotBubble');
+const mascotImg = document.getElementById('mascotImg');
+
+mascotImg.src = MASCOT_SRC;
+mascotImg.onerror = () => {
+  mascotImg.src = "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><rect width='100%' height='100%' rx='24' ry='24' fill='#16a34a'/><text x='50%' y='54%' font-size='120' text-anchor='middle' dominant-baseline='middle'>🌿</text></svg>`);
+};
+
+window.addEventListener('load', () => {
+  const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+  const startX = Math.max(16, vw / 2 - 56);
+  wrap.style.left = `${startX}px`; wrap.style.top = '-140px';
+  
+  wrap.animate([
+    { transform: 'translateY(-120vh)' }, { transform: 'translateY(0)' },
+    { transform: 'translateY(-16px)' }, { transform: 'translateY(0)' }
+  ], { duration: 1200, easing: 'cubic-bezier(.2,.9,.35,1.2)' }).finished.then(() => {
+    const currentRect = wrap.getBoundingClientRect();
+    const dx = (vw - 16 - currentRect.right);
+    const dy = (window.innerHeight - 16 - currentRect.bottom);
+    wrap.animate([{ transform: 'translate(0, 0)' }, { transform: `translate(${dx}px, ${dy}px)` }], { duration: 900, easing: 'ease-in-out' }).finished.then(() => {
+      wrap.style.left = 'auto'; wrap.style.top = 'auto'; wrap.style.right = '16px'; wrap.style.bottom = '16px'; wrap.style.transform = 'translate(0,0)';
+      bubble.animate([{ opacity: 0, transform: 'translateY(20px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 350, easing: 'ease-out', fill: 'forwards' });
+      setTimeout(() => { bubble.animate([{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0, transform: 'translateY(6px)' }], { duration: 250, easing: 'ease-in', fill: 'forwards' }); }, 3000);
+    });
+  });
+});
+</script>
+</body>
+</html>
