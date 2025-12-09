@@ -1,0 +1,3 @@
+query,terms,allowed_categories,stores,max_price
+"best organic avocado deals under $2","organic|avocado","produce|fruit","target.com|walmart.com",2.00
+"cheapest 2% milk at walmart and target","2%|milk","dairy","walmart.com|target.com"
